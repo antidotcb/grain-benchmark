@@ -1,7 +1,7 @@
 #include <benchmark/benchmark.h>
 #include <cassert>
-#include <cmath>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <ranges>
@@ -11,29 +11,7 @@
 #include <vector>
 
 
-template<typename T, typename C>
-inline int loadGrainPass(const T levels, C compare) {
-    int totalCapacity = 0;
-    int currentCapacity = 0;
-    int firstHeight = 0;
-
-    for (const int currentHeight: levels) {
-        if (compare(currentHeight, firstHeight))
-            currentCapacity += firstHeight - currentHeight;
-        else {
-            firstHeight = currentHeight;
-            totalCapacity += currentCapacity;
-            currentCapacity = 0;
-        }
-    }
-    return totalCapacity;
-}
-
-int loadGrain3(std::span<const int> levels) {
-    return loadGrainPass(levels, std::less<>{}) + loadGrainPass(std::ranges::reverse_view(levels), std::less_equal<>{});
-}
-
-int loadGrain7(std::span<const int> levels) {
+int loadGrainIan(std::span<const int> levels) {
     if (levels.size() < 2)
         return 0;
 
@@ -63,78 +41,49 @@ int loadGrain7(std::span<const int> levels) {
     return totalCapacity;
 }
 
-int loadGrain2(const std::vector<int>& levels) {
-    const auto size = levels.size();
-    std::vector<int> left(size + 1, 0);
-    std::vector<int> right(size + 1, 0);
-    left[0] = 0;
-    right[size] = 0;
-    int result = 0;
-
-    for (auto i = 0; i < size; ++i) {
-        const auto j = size - i - 1;
-        left[i + 1] = std::max(levels[i], left[i]);
-        right[j] = std::max(levels[j], right[j + 1]);
-        const auto grain_1 = std::max(std::min(left[i], right[i + 1]) - levels[i], 0);
-        const auto grain_2 = std::max(std::min(left[j], right[j + 1]) - levels[j], 0);
-
-        result += (i >= size / 2) ? (i == j ? grain_1 : grain_1 + grain_2) : 0;
+inline void calculate(const std::vector<int>& levels, size_t pos, size_t& pos_max, int& max_level, int& level, size_t& area, size_t& result) {
+    level = levels[pos];
+    if (level < max_level) {
+        area += level;
+    } else {
+        size_t len = pos_max - pos - 1;
+        result += max_level * len - area;
+        pos_max = pos;
+        area = 0;
+        max_level = level;
     }
-
-    return result;
 }
 
-int loadGrain(const std::vector<int>& levels) {
+size_t loadGrainMe(const std::vector<int>& levels) {
     if (levels.size() < 3) return 0;
     using namespace std;
-    int result = 0;
-    int l, r, l_max, r_max;
+    size_t result = 0;
+    size_t l, r, l_max, r_max;
     l = l_max = 0;
     r = r_max = static_cast<int>(levels.size() - 1);
     int max_r_level = levels[r];
     int r_level = max_r_level;
     int max_l_level = levels[l];
     int l_level = max_l_level;
-    int area_l = 0;
-    int area_r = 0;
-    int len;
+    size_t area_l = 0;
+    size_t area_r = 0;
     while (l < r - 1) {
         if (r_level <= l_level) {
             r--;
-
-
-            r_level = levels[r];
-            if (r_level < max_r_level) {
-                area_r += r_level;
-            } else {
-                len = r_max - r - 1;
-                result += max_r_level * len - area_r;
-                r_max = r;
-                area_r = 0;
-                max_r_level = r_level;
-            }
-
+            calculate(levels, r, r_max, max_r_level, r_level, area_r, result);
         } else {
             l++;
-            l_level = levels[l];
-            if (l_level < max_l_level) {
-                area_l += l_level;
-            } else {
-                len = l - l_max - 1;
-                result += max_l_level * len - area_l;
-                l_max = l;
-                area_l = 0;
-                max_l_level = l_level;
-            }
+            calculate(levels, l, l_max, max_l_level, l_level, area_l, result);
         }
     }
-    len = r_max - l_max - 1;
+    auto len = r_max - l_max - 1;
     result += min(max_r_level, max_l_level) * len - area_r - area_l;
     return result;
 }
 
+
 static constexpr size_t g_Size = 100000000;
-static constexpr int g_Max = 10000000;
+static constexpr int g_Max = 100000;
 std::vector<int> vector(g_Size);
 
 static void Setup() {
@@ -144,34 +93,21 @@ static void Setup() {
     }
 }
 
-static void BM_IanFirst(benchmark::State& state) {
+static void BM_ian(benchmark::State& state) {
     Setup();
     for (auto _: state) {
-        benchmark::DoNotOptimize(loadGrain3(vector));
-    }
-}
-static void BM_IanSecond(benchmark::State& state) {
-    Setup();
-    for (auto _: state) {
-        benchmark::DoNotOptimize(loadGrain7(vector));
-    }
-}
-static void BM_MyFirst(benchmark::State& state) {
-    Setup();
-    for (auto _: state) {
-        benchmark::DoNotOptimize(loadGrain2(vector));
-    }
-}
-static void BM_MyLatest(benchmark::State& state) {
-    Setup();
-    for (auto _: state) {
-        benchmark::DoNotOptimize(loadGrain(vector));
+        benchmark::DoNotOptimize(loadGrainIan(vector));
     }
 }
 
-//BENCHMARK(BM_IanFirst);
-BENCHMARK(BM_IanSecond);
-//BENCHMARK(BM_MyFirst);
-BENCHMARK(BM_MyLatest);
+static void MB_antidotcb(benchmark::State& state) {
+    Setup();
+    for (auto _: state) {
+        benchmark::DoNotOptimize(loadGrainMe(vector));
+    }
+}
+
+BENCHMARK(BM_ian);
+BENCHMARK(MB_antidotcb);
 
 BENCHMARK_MAIN();
